@@ -95,3 +95,38 @@ class TestEmptyResult:
         assert result is None
 
 
+
+class TestDaoErrors:
+
+    def test_reraises_exception_from_dao(self, controller, mock_dao):
+        mock_dao.find.side_effect = Exception("DB failure")
+
+        with pytest.raises(Exception, match="DB failure"):
+            controller.get_user_by_email("user@test.com")
+
+
+class TestUpdate:
+
+    def test_wraps_data_with_set(self, controller):
+        with patch.object(controller.__class__.__bases__[0], "update") as mock_parent:
+            mock_parent.return_value = {"nModified": 1}
+
+            result = controller.update("id1", {"name": "Bob"})
+
+            mock_parent.assert_called_once_with(
+                id="id1",
+                data={"$set": {"name": "Bob"}}
+            )
+
+            assert result == {"nModified": 1}
+
+    def test_empty_update(self, controller):
+        with patch.object(controller.__class__.__bases__[0], "update") as mock_parent:
+            mock_parent.return_value = {"nModified": 0}
+
+            controller.update("id1", {})
+
+            mock_parent.assert_called_once_with(
+                id="id1",
+                data={"$set": {}}
+            )
