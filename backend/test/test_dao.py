@@ -46,4 +46,66 @@ def dao(collection):
     dao.collection = collection
     return dao
 
+# -----------------------
+# TEST CASES 
+# -----------------------
+
+def test_valid_user(dao):
+    data = {
+        "firstName": "Ibbu",
+        "lastName": "Khan",
+        "email": "ibbu@example.com"
+    }
+
+    result = dao.create(data)
+    assert result is not None
+
+
+def test_missing_required_field(dao):
+    data = {
+        "firstName": "Abhi",
+        # missing lastName
+        "email": "abhi@example.com"
+    }
+
+    with pytest.raises(Exception):
+        dao.create(data)
+
+
+def test_wrong_data_type(dao):
+    data = {
+        "firstName": 123,  # should be string
+        "lastName": "Rahul",
+        "email": "rahul@example.com"
+    }
+
+    with pytest.raises(Exception):
+        dao.create(data)
+
+
+def test_duplicate_email(dao):
+    data = {
+        "firstName": "Sameen",
+        "lastName": "Ali",
+        "email": "sameen@example.com"
+    }
+
+    dao.create(data)
+
+    # duplicate insert
+    with pytest.raises(Exception):
+        dao.create(data)
+
+
+def test_created_document_has_id(dao):
+    data = {
+        "firstName": "Rahul",
+        "lastName": "Sharma",
+        "email": "rahul.sharma@example.com"
+    }
+
+    result = dao.create(data)
+
+    assert "_id" in result
+
 
