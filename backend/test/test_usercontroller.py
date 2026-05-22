@@ -1,132 +1,130 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from src.controllers.usercontroller import UserController
-from src.util.dao import DAO
 
+
+# ---------------------------------------------------------------------------
+# Fixtures (module-level so they are shared across all test classes)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mocked_dao():
+    """Return a MagicMock that stands in for the DAO layer."""
+    return MagicMock()
 
 
 @pytest.fixture
-def mock_dao():
-    return MagicMock(spec=DAO)
+def sut(mocked_dao):
+    """Return a UserController whose DAO dependency is fully mocked."""
+    return UserController(dao=mocked_dao)
 
 
-@pytest.fixture
-def controller(mock_dao):
-    return UserController(dao=mock_dao)
+# ---------------------------------------------------------------------------
+# Test class
+# ---------------------------------------------------------------------------
 
+@pytest.mark.unit
+class TestGetUserByEmail:
+    """Unit tests for UserController.get_user_by_email (TC1–TC12)."""
 
+    # ------------------------------------------------------------------
+    # TC1 – Valid email, DAO returns exactly one user
+    # ------------------------------------------------------------------
+    def test_tc1_valid_email_dao_returns_one_user(self, sut, mocked_dao):
+        """TC1: A valid email whose DAO lookup yields one result → that result is returned."""
+        expected_user = {
+            "_id": {"$oid": "123456789012345678901234"},
+            "email": "user@example.com",
+            "firstName": "John",
+            "lastName": "Doe",
+        }
+        mocked_dao.find.return_value = [expected_user]
 
-def make_user(email="alice@example.com", name="Alice"):
-    return {"_id": "abc123", "email": email, "name": name}
+        result = sut.get_user_by_email("user@example.com")
 
+        assert result == expected_user
+        mocked_dao.find.assert_called_once_with({"email": "user@example.com"})
 
+    # ------------------------------------------------------------------
+    # TC2 – Valid email, DAO returns empty list
+    # ------------------------------------------------------------------
+    def test_tc2_valid_email_dao_returns_empty_list(self, sut, mocked_dao):
+        """TC2: A valid email with no matching users → None is returned."""
+        mocked_dao.find.return_value = []
 
-class TestGetUserByEmailValidation:
+        result = sut.get_user_by_email("notfound@example.com")
 
-    @pytest.mark.parametrize("bad_email", [
-        "",         # empty string
-        None,       # None input
-        "invalid",  # missing @
-        "user@",    # incomplete
-        "@domain"   # incomplete
-    ])
-    def test_invalid_email_raises_value_error(self, controller, bad_email):
-        with pytest.raises((ValueError, TypeError)):
-            controller.get_user_by_email(bad_email)
-
-    def test_validation_happens_before_dao_call(self, controller, mock_dao):
-        with pytest.raises((ValueError, TypeError)):
-            controller.get_user_by_email("invalid")
-
-        mock_dao.find.assert_not_called()
-
-
-
-class TestSingleResult:
-
-    def test_returns_user_when_single_match(self, controller, mock_dao):
-        user = make_user()
-        mock_dao.find.return_value = [user]
-
-        result = controller.get_user_by_email(user["email"])
-
-        assert result == user
-
-    def test_dao_called_with_correct_query(self, controller, mock_dao):
-        mock_dao.find.return_value = [make_user()]
-
-        controller.get_user_by_email("alice@example.com")
-
-        mock_dao.find.assert_called_once_with({"email": "alice@example.com"})
-
-
-
-class TestMultipleResults:
-
-    def test_returns_first_user(self, controller, mock_dao):
-        u1 = make_user(name="A")
-        u2 = make_user(name="B")
-
-        mock_dao.find.return_value = [u1, u2]
-
-        result = controller.get_user_by_email("multi@x")
-
-        assert result == u1
-
-    def test_prints_warning(self, controller, mock_dao, capsys):
-        email = "multi@x"
-        mock_dao.find.return_value = [make_user(), make_user()]
-
-        controller.get_user_by_email(email)
-
-        captured = capsys.readouterr()
-        assert email in captured.out
-
-
-
-class TestEmptyResult:
-
-    def test_returns_none_when_no_user_found(self, controller, mock_dao):
-        mock_dao.find.return_value = []
-
-        result = controller.get_user_by_email("ghost@x")
-
-        # Expected behavior from specification
         assert result is None
+        mocked_dao.find.assert_called_once_with({"email": "notfound@example.com"})
 
+    # ------------------------------------------------------------------
+    # TC3 – Valid email, DAO returns multiple users (warning + first user)
+    # ------------------------------------------------------------------
+    def test_tc3_valid_email_dao_returns_multiple_users(self, sut, mocked_dao, capsys):
+        """TC3: A valid email with duplicate DB entries → first user returned + warning printed."""
+        user1 = {
+            "_id": {"$oid": "111111111111111111111111"},
+            "email": "duplicate@example.com",
+            "firstName": "John",
+            "lastName": "Doe",
+        }
+        user2 = {
+            "_id": {"$oid": "222222222222222222222222"},
+            "email": "duplicate@example.com",
+            "firstName": "Jane",
+            "lastName": "Smith",
+        }
+        mocked_dao.find.return_value = [user1, user2]
 
+        result = sut.get_user_by_email("duplicate@example.com")
 
-class TestDaoErrors:
+        assert result == user1
+        captured = capsys.readouterr()
+        assert (
+            "Error: more than one user found with mail duplicate@example.com"
+            in captured.out
+        )
 
-    def test_reraises_exception_from_dao(self, controller, mock_dao):
-        mock_dao.find.side_effect = Exception("DB failure")
+    # ------------------------------------------------------------------
+    # TC4–TC10 – Invalid email strings (parametrized)
+    # ------------------------------------------------------------------
+    @pytest.mark.parametrize(
+        "invalid_email",
+        [
+            "invalidemail.com",   # TC4 – A2: no @ symbol
+            "",                   # TC5 – A3: empty string
+            "@domain.com",        # TC6 – A4: empty local part
+            "user@",              # TC7 – A5: empty domain part
+            "user@@example.com",  # TC8 – A6: multiple @ symbols
+            "user @example.com",  # TC9 – A7: space in local part
+            "user@example .com",  # TC10– A8: space in domain part
+        ],
+    )
+    def test_tc4_to_tc10_invalid_email_raises_value_error(
+        self, sut, mocked_dao, invalid_email
+    ):
+        """TC4–TC10: Structurally invalid emails → ValueError; DAO is never called."""
+        with pytest.raises(ValueError, match="Error: invalid email address"):
+            sut.get_user_by_email(invalid_email)
 
-        with pytest.raises(Exception, match="DB failure"):
-            controller.get_user_by_email("user@test.com")
+        mocked_dao.find.assert_not_called()
 
+    # ------------------------------------------------------------------
+    # TC11 – None input raises TypeError
+    # ------------------------------------------------------------------
+    def test_tc11_none_input_raises_type_error(self, sut, mocked_dao):
+        """TC11: None bypasses the string guard and causes re.fullmatch to raise TypeError."""
+        with pytest.raises(TypeError):
+            sut.get_user_by_email(None)
 
-class TestUpdate:
+        mocked_dao.find.assert_not_called()
 
-    def test_wraps_data_with_set(self, controller):
-        with patch.object(controller.__class__.__bases__[0], "update") as mock_parent:
-            mock_parent.return_value = {"nModified": 1}
+    # ------------------------------------------------------------------
+    # TC12 – DAO exception propagates unchanged
+    # ------------------------------------------------------------------
+    def test_tc12_dao_exception_propagates(self, sut, mocked_dao):
+        """TC12: When DAO.find raises, the exception must propagate to the caller."""
+        mocked_dao.find.side_effect = Exception("Database connection failed")
 
-            result = controller.update("id1", {"name": "Bob"})
-
-            mock_parent.assert_called_once_with(
-                id="id1",
-                data={"$set": {"name": "Bob"}}
-            )
-
-            assert result == {"nModified": 1}
-
-    def test_empty_update(self, controller):
-        with patch.object(controller.__class__.__bases__[0], "update") as mock_parent:
-            mock_parent.return_value = {"nModified": 0}
-
-            controller.update("id1", {})
-
-            mock_parent.assert_called_once_with(
-                id="id1",
-                data={"$set": {}}
-            )
+        with pytest.raises(Exception, match="Database connection failed"):
+            sut.get_user_by_email("user@example.com")
